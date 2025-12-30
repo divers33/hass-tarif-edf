@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import (
     TimestampDataUpdateCoordinator,
     UpdateFailed,
 )
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DEFAULT_REFRESH_INTERVAL,
@@ -100,7 +101,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
     async def get_tempo_day(self, target_date: date) -> dict:
         """Fetch Tempo color for a specific date."""
         date_str = target_date.strftime("%Y-%m-%d")
-        now = datetime.now().time()
+        now = dt_util.now().time()
         check_limit = str_to_time(TEMPO_TOMRROW_AVAILABLE_AT)
 
         # Check cache first
@@ -151,7 +152,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
         self, content: bytes, contract_power: str, contract_type: str
     ) -> dict | None:
         """Parse tariff CSV and return the applicable rates based on current date."""
-        today = date.today()
+        today = dt_util.now().date()
         decoded = content.decode("utf-8").splitlines()
         reader = csv.DictReader(decoded, delimiter=";")
 
@@ -265,7 +266,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
         refresh_interval = self.config_entry.options.get(
             "refresh_interval", DEFAULT_REFRESH_INTERVAL
         )
-        fresh_data_limit = datetime.now() - timedelta(days=refresh_interval)
+        fresh_data_limit = dt_util.now() - timedelta(days=refresh_interval)
         tarif_needs_update = (
             self.data.get("last_refresh_at") is None
             or self.data["last_refresh_at"] < fresh_data_limit
@@ -292,7 +293,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
 
                 if rates:
                     self.data.update(rates)
-                    self.data["last_refresh_at"] = datetime.now()
+                    self.data["last_refresh_at"] = dt_util.now()
                 else:
                     _LOGGER.warning(
                         "No matching tariff found for power %s kVA", contract_power
@@ -307,7 +308,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
 
         # Handle Tempo-specific data
         if contract_type == CONTRACT_TYPE_TEMPO:
-            today_date = date.today()
+            today_date = dt_util.now().date()
             yesterday = today_date - timedelta(days=1)
             tomorrow = today_date + timedelta(days=1)
 
@@ -332,7 +333,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
                 # Before 06:00, use yesterday's color
                 current_color_code = tempo_yesterday.get("codeJour", 0)
 
-                if datetime.now().time() >= str_to_time(TEMPO_DAY_START_AT):
+                if dt_util.now().time() >= str_to_time(TEMPO_DAY_START_AT):
                     _LOGGER.debug("Using today's tempo prices")
                     current_color_code = tempo_today.get("codeJour", 0)
                 else:
@@ -393,7 +394,7 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
 
             # Check if currently in off-peak hours
             if off_peak_hours_ranges:
-                now = datetime.now().time()
+                now = dt_util.now().time()
 
                 for time_range in off_peak_hours_ranges.split(","):
                     time_range = time_range.strip()

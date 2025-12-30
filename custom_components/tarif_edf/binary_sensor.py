@@ -4,10 +4,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
-from homeassistant.components.binary_sensor import (
-    BinarySensorEntity,
-    BinarySensorDeviceClass,
-)
+from homeassistant.components.binary_sensor import BinarySensorEntity
 
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -44,7 +41,7 @@ async def async_setup_entry(
 class TarifEdfOffPeakBinarySensor(CoordinatorEntity, BinarySensorEntity):
     """Binary sensor indicating if currently in off-peak hours."""
 
-    _attr_device_class = BinarySensorDeviceClass.POWER
+    _attr_device_class = None
 
     def __init__(self, coordinator: TarifEdfDataUpdateCoordinator) -> None:
         """Initialize the off-peak binary sensor."""
