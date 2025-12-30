@@ -6,7 +6,6 @@ import re
 from typing import Any
 import logging
 import csv
-import ssl
 import aiohttp
 import async_timeout
 
@@ -43,14 +42,7 @@ async def async_get_remote_file(url: str, as_json: bool = False) -> bytes | dict
     """Fetch URL content asynchronously using aiohttp."""
     headers = {"User-Agent": USER_AGENT}
 
-    # Create SSL context that doesn't verify certificates (for api-couleur-tempo.fr TLS issues)
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-
-    connector = aiohttp.TCPConnector(ssl=ssl_context)
-
-    async with aiohttp.ClientSession(connector=connector) as session:
+    async with aiohttp.ClientSession() as session:
         async with async_timeout.timeout(HTTP_TIMEOUT):
             async with session.get(url, headers=headers, allow_redirects=True) as response:
                 response.raise_for_status()
