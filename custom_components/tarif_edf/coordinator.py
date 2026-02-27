@@ -8,6 +8,7 @@ from datetime import timedelta, datetime, date
 import logging
 import re
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -69,6 +70,14 @@ def get_tempo_color_from_code(code: int) -> str:
     return TEMPO_COLORS_MAPPING.get(code, "indéterminé")
 
 
+_FRANCE_TZ = ZoneInfo("Europe/Paris")
+
+
+def adjust_tempo_datetime(d: date) -> datetime:
+    """Return the Tempo billing day start for a calendar date (06:00 Europe/Paris)."""
+    return datetime.combine(d, str_to_time(TEMPO_DAY_START_AT), tzinfo=_FRANCE_TZ)
+
+
 class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
     """Data update coordinator for the Tarif EDF integration."""
 
@@ -85,6 +94,9 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
         self.config_entry = entry
         self.tempo_prices: list[dict] = []
         self._session = async_get_clientsession(hass)
+        self._tempo_billing_days: list[tuple[datetime, datetime, int]] = []
+        self._fallback_today_code: int | None = None
+        self._fallback_today_date: date | None = None
 
     async def _async_fetch_url(self, url: str, as_json: bool = False) -> bytes | dict:
         """Fetch URL content using the shared aiohttp session."""
@@ -317,27 +329,57 @@ class TarifEdfDataUpdateCoordinator(TimestampDataUpdateCoordinator):
                 tempo_today = await self.get_tempo_day(today_date)
                 tempo_tomorrow = await self.get_tempo_day(tomorrow)
 
+                # Fix 2: Resolve calendar-day colors with fallback
                 yesterday_color = get_tempo_color_from_code(
                     tempo_yesterday.get("codeJour", 0)
                 )
-                today_color = get_tempo_color_from_code(tempo_today.get("codeJour", 0))
                 tomorrow_color = get_tempo_color_from_code(
                     tempo_tomorrow.get("codeJour", 0)
                 )
+
+                today_code = tempo_today.get("codeJour", 0)
+                if today_code == 0 and self._fallback_today_date == today_date and self._fallback_today_code:
+                    _LOGGER.debug(
+                        "Today's color not yet published — using previous demain fallback (%s)",
+                        get_tempo_color_from_code(self._fallback_today_code),
+                    )
+                    today_code = self._fallback_today_code
+                today_color = get_tempo_color_from_code(today_code)
+
+                # Store tomorrow's code for use as today's fallback the next day
+                tomorrow_code = tempo_tomorrow.get("codeJour", 0)
+                if tomorrow_code != 0:
+                    self._fallback_today_code = tomorrow_code
+                    self._fallback_today_date = tomorrow
 
                 self.data["tempo_couleur_hier"] = yesterday_color
                 self.data["tempo_couleur_aujourdhui"] = today_color
                 self.data["tempo_couleur_demain"] = tomorrow_color
 
-                # Determine current color based on time of day
-                # Before 06:00, use yesterday's color
-                current_color_code = tempo_yesterday.get("codeJour", 0)
+                # Fix 1: Build 06:00-to-06:00 billing ranges for the three fetched days
+                self._tempo_billing_days = []
+                for day_date, resolved_code in [
+                    (yesterday, tempo_yesterday.get("codeJour", 0)),
+                    (today_date, today_code),
+                    (tomorrow, tempo_tomorrow.get("codeJour", 0)),
+                ]:
+                    if resolved_code != 0:
+                        billing_start = adjust_tempo_datetime(day_date)
+                        billing_end = adjust_tempo_datetime(day_date + timedelta(days=1))
+                        self._tempo_billing_days.append((billing_start, billing_end, resolved_code))
 
-                if dt_util.now().time() >= str_to_time(TEMPO_DAY_START_AT):
-                    _LOGGER.debug("Using today's tempo prices")
-                    current_color_code = tempo_today.get("codeJour", 0)
-                else:
-                    _LOGGER.debug("Using yesterday's tempo prices")
+                # Find current billing color by range lookup
+                now_localized = dt_util.now()
+                current_color_code = 0
+                for billing_start, billing_end, code in self._tempo_billing_days:
+                    if billing_start <= now_localized < billing_end:
+                        current_color_code = code
+                        break
+
+                if current_color_code == 0:
+                    _LOGGER.debug(
+                        "No billing range matched current time — tempo_couleur will be indéterminé"
+                    )
 
                 # Set current Tempo rates
                 if current_color_code in [1, 2, 3]:
